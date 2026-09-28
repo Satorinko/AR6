@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>AR6</title>
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      touch-action: none; /* ブラウザ標準のスクロールや引っ張りリフレッシュを禁止 */
+    }
+    /* 撮影ボタンのスタイル */
+    #snap-btn {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 24px;
+      font-size: 16px;
+      background-color: #ff69b4;
+      color: white;
+      border: none;
+      border-radius: 25px;
+      cursor: pointer;
+      z-index: 1000;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      font-weight: bold;
+    }
+    #snap-btn:active {
+      background-color: #ff1493;
+    }
+  </style>
+</head>
+<body>
+
+  <button id="snap-btn">写真を撮る</button>
+
+  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" screenshot>
+    <a-assets>
+      <a-asset-item id="blossom-model" src="pink-blossom.glb"></a-asset-item>
+    </a-assets>
+
+    <!-- 3Dモデル（モデル内のアニメーションを繰り返し再生） -->
+    <a-entity id="ar-object"
+              gltf-model="#blossom-model"
+              animation-mixer="loop: repeat"
+              position="0 -1.2 -5"
+              rotation="0 0 0"
+              scale="1 1 1"></a-entity>
+
+    <!-- モデルを照らすライト -->
+    <a-entity light="type: ambient; color: #ffffff; intensity: 0.8"></a-entity>
+    <a-entity light="type: directional; color: #ffffff; intensity: 0.6" position="1 3 2"></a-entity>
+
+    <a-entity camera></a-entity>
+  </a-scene>
+
+<script>
+// ==========================================
+// 1. 指定の指操作（1本全方向回転・2本拡大縮小・3本移動）
+// ==========================================
+const arObject = document.getElementById('ar-object');
+const OBJECT_Z = -5;      // モデルを置く奥行き（position の3つ目の値と合わせる）
+let startX = 0;
+let startY = 0;          // 上下回転用の初期位置
+let startRotationX = 0;  // X軸（上下）の初期角度
+let startRotationY = 0;
+let startDist = 0;
+let startScale = 1;
+let startObjX = 0, startObjY = 0;
+let startTouchPos3 = { x: 0, y: 0 };
+
+window.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+}, { passive: false });
+
+window.addEventListener('touchstart', function(e) {
+  if (e.touches.length === 1) {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY; // 現在のY座標を保存
+
+    const currentRot = arObject.getAttribute('rotation') || { x: 0, y: 0, z: 0 };
+    startRotationX = currentRot.x; // 現在のX軸の回転角を保存
+    startRotationY = currentRot.y;
+  } else if (e.touches.length === 2) {
+    startDist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    const currentScale = arObject.getAttribute('scale') || { x: 1, y: 1, z: 1 };
+    startScale = currentScale.x;
+  } else if (e.touches.length === 3) {
+    startTouchPos3.x = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
+    startTouchPos3.y = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
+    const currentPos = arObject.getAttribute('position') || { x: 0, y: 0, z: OBJECT_Z };
+    startObjX = currentPos.x;
+    startObjY = currentPos.y;
+  }
+});
+
+window.addEventListener('touchmove', function(e) {
+  if (e.touches.length === 1 && startX !== 0) {
+    const deltaX = e.touches[0].clientX - startX;
+    const deltaY = e.touches[0].clientY - startY; // 上下の移動量を計算
+
+    const newRotationY = startRotationY + (deltaX * 0.5); // 左右の動きでY軸回転
+    const newRotationX = startRotationX + (deltaY * 0.5); // 上下の動きでX軸回転
+
+    arObject.setAttribute('rotation', `${newRotationX} ${newRotationY} 0`);
+
+  } else if (e.touches.length === 2 && startDist !== 0) {
+    const currentDist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    const factor = currentDist / startDist;
+    // 3Dモデルなので縦横奥行きを同じ倍率で拡大縮小する
+    const newScale = Math.max(0.1, Math.min(5.0, startScale * factor));
+    arObject.setAttribute('scale', `${newScale} ${newScale} ${newScale}`);
+
+  } else if (e.touches.length === 3 && startTouchPos3.x !== 0) {
+    const currentTouchX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
+    const currentTouchY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
+    const deltaX = currentTouchX - startTouchPos3.x;
+    const deltaY = currentTouchY - startTouchPos3.y;
+    const newX = startObjX + (deltaX * 0.012);
+    const newY = startObjY - (deltaY * 0.012);
+    arObject.setAttribute('position', `${newX} ${newY} ${OBJECT_Z}`);
+  }
+});
+
+window.addEventListener('touchend', function(e) {
+  if (e.touches.length < 3) startTouchPos3 = { x: 0, y: 0 };
+  if (e.touches.length < 2) startDist = 0;
+  if (e.touches.length < 1) {
+    startX = 0;
+    startY = 0; // 指を離した時にリセット
+  }
+});
+
+// ==========================================
+// 2. 写真撮影（キャプチャ）の処理
+// ==========================================
+document.getElementById('snap-btn').addEventListener('click', function() {
+  const scene = document.querySelector('a-scene');
+  if (!scene || !scene.components.screenshot) {
+    alert('AR機能の読み込み中です。数秒待ってからもう一度押してください。');
+    return;
+  }
+  const targetCanvas = scene.components.screenshot.getCanvas('perspective');
+  const video = document.querySelector('video');
+  if (!video) {
+    alert('カメラ映像が取得できません。');
+    return;
+  }
+
+  const mergeCanvas = document.createElement('canvas');
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  mergeCanvas.width = width;
+  mergeCanvas.height = height;
+  const ctx = mergeCanvas.getContext('2d');
+
+  const videoWidth = video.videoWidth || width;
+  const videoHeight = video.videoHeight || height;
+  const videoAspectRatio = videoWidth / videoHeight;
+  const canvasAspectRatio = width / height;
+  let drawWidth, drawHeight, drawX, drawY;
+
+  if (videoAspectRatio > canvasAspectRatio) {
+    drawHeight = height;
+    drawWidth = drawHeight * videoAspectRatio;
+    drawX = (width - drawWidth) / 2;
+    drawY = 0;
+  } else {
+    drawWidth = width;
+    drawHeight = drawWidth / videoAspectRatio;
+    drawX = 0;
+    drawY = (height - drawHeight) / 2;
+  }
+
+  ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
+  if (targetCanvas) {
+    ctx.drawImage(targetCanvas, 0, 0, width, height);
+  }
+
+  try {
+    const imgData = mergeCanvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = 'ar-photo_' + Date.now() + '.png';
+    link.href = imgData;
+    link.click();
+  } catch (e) {
+    try {
+      const imgData = mergeCanvas.toDataURL('image/png');
+      const newTab = window.open();
+      newTab.document.body.innerHTML = `<img src="${imgData}" style="width:100%;">`;
+    } catch(err) {
+      alert('自動保存が制限されました。スマートフォンのスクリーンショット機能で撮影してください。');
+    }
+  }
+});
+</script>
+</body>
+</html>
