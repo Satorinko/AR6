@@ -6,12 +6,43 @@
   <title>AR6</title>
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
-  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
   <style>
-    body {
+    html, body {
       margin: 0;
+      height: 100%;
       overflow: hidden;
+      background: #000;
       touch-action: none; /* ブラウザ標準のスクロールや引っ張りリフレッシュを禁止 */
+    }
+    /* カメラ映像（一番奥に画面いっぱいで表示） */
+    #camera-video {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 0;
+    }
+    /* 3Dモデルを描くシーン（カメラ映像の手前・背景は透明） */
+    a-scene {
+      position: fixed !important;
+      top: 0;
+      left: 0;
+      width: 100% !important;
+      height: 100% !important;
+      z-index: 1;
+    }
+    #status {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      color: white;
+      font-size: 13px;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+      z-index: 1000;
+      pointer-events: none;
     }
     /* 撮影ボタンのスタイル */
     #snap-btn {
@@ -37,9 +68,12 @@
 </head>
 <body>
 
+  <video id="camera-video" playsinline muted autoplay></video>
+  <div id="status"></div>
   <button id="snap-btn">写真を撮る</button>
 
-  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" screenshot>
+  <a-scene embedded vr-mode-ui="enabled: false"
+           renderer="alpha: true; antialias: true; precision: high; colorManagement: true">
     <a-assets>
       <a-asset-item id="blossom-model" src="pink-blossom.glb"></a-asset-item>
     </a-assets>
@@ -56,7 +90,7 @@
     <a-entity light="type: ambient; color: #ffffff; intensity: 0.8"></a-entity>
     <a-entity light="type: directional; color: #ffffff; intensity: 0.6" position="1 3 2"></a-entity>
 
-    <a-entity camera></a-entity>
+    <a-entity camera look-controls="enabled: false" wasd-controls="enabled: false"></a-entity>
   </a-scene>
 
 <script>
@@ -143,50 +177,52 @@ window.addEventListener('touchend', function(e) {
 });
 
 // ==========================================
-// 2. 写真撮影（キャプチャ）の処理
+// 2. カメラ映像の起動（背面カメラ）
+// ==========================================
+const video = document.getElementById('camera-video');
+const statusEl = document.getElementById('status');
+
+(async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+  } catch (e) {
+    statusEl.textContent = 'カメラを使用できません。ブラウザのカメラ許可を確認してください。';
+  }
+})();
+
+// ==========================================
+// 3. 写真撮影（カメラ映像＋3Dモデルを合成して保存）
 // ==========================================
 document.getElementById('snap-btn').addEventListener('click', function() {
   const scene = document.querySelector('a-scene');
-  if (!scene || !scene.components.screenshot) {
+  if (!scene || !scene.canvas || !scene.renderer) {
     alert('AR機能の読み込み中です。数秒待ってからもう一度押してください。');
-    return;
-  }
-  const targetCanvas = scene.components.screenshot.getCanvas('perspective');
-  const video = document.querySelector('video');
-  if (!video) {
-    alert('カメラ映像が取得できません。');
     return;
   }
 
   const mergeCanvas = document.createElement('canvas');
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const width = scene.canvas.width;
+  const height = scene.canvas.height;
   mergeCanvas.width = width;
   mergeCanvas.height = height;
   const ctx = mergeCanvas.getContext('2d');
 
-  const videoWidth = video.videoWidth || width;
-  const videoHeight = video.videoHeight || height;
-  const videoAspectRatio = videoWidth / videoHeight;
-  const canvasAspectRatio = width / height;
-  let drawWidth, drawHeight, drawX, drawY;
-
-  if (videoAspectRatio > canvasAspectRatio) {
-    drawHeight = height;
-    drawWidth = drawHeight * videoAspectRatio;
-    drawX = (width - drawWidth) / 2;
-    drawY = 0;
-  } else {
-    drawWidth = width;
-    drawHeight = drawWidth / videoAspectRatio;
-    drawX = 0;
-    drawY = (height - drawHeight) / 2;
+  // カメラ映像を画面と同じ見え方（object-fit: cover）で描く
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (vw && vh) {
+    const scale = Math.max(width / vw, height / vh);
+    const dw = vw * scale, dh = vh * scale;
+    ctx.drawImage(video, (width - dw) / 2, (height - dh) / 2, dw, dh);
   }
 
-  ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
-  if (targetCanvas) {
-    ctx.drawImage(targetCanvas, 0, 0, width, height);
-  }
+  // 3Dモデルを描き直してから取り込む
+  scene.renderer.render(scene.object3D, scene.camera);
+  ctx.drawImage(scene.canvas, 0, 0, width, height);
 
   try {
     const imgData = mergeCanvas.toDataURL('image/png');
